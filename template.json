@@ -1,0 +1,1258 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Description": "student-results-backend",
+  "Parameters": {
+    "apiGatewayStageName": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "CoreApiLambda": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Handler": "index.handler",
+        "Runtime": "nodejs12.x",
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-Core-API-Lambda"
+        },
+        "CodeUri": "src/ApiLambda",
+        "Role": {
+          "Fn::GetAtt": ["CoreApiLambdaRole", "Arn"]
+        },
+        "Environment": {
+          "Variables": {
+            "userPoolId": {
+              "Ref": "CognitoUserPool"
+            },
+            "ddbName": {
+              "Fn::Select": [
+                1,
+                {
+                  "Fn::Split": [
+                    "/",
+                    {
+                      "Fn::GetAtt": ["DDBTable", "Arn"]
+                    }
+                  ]
+                }
+              ]
+            },
+            "documentsS3": {
+              "Ref": "DocumentS3Bucket"
+            }
+          }
+        }
+      }
+    },
+    "CoreApiLambdaLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "DependsOn": "CoreApiLambda",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/aws/lambda/",
+              {
+                "Ref": "CoreApiLambda"
+              }
+            ]
+          ]
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "CoreApiLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Ref": "CoreApiLambdaExecutionPolicy"
+          }
+        ]
+      }
+    },
+    "CoreApiLambdaExecutionPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Base permissions needed by all lambda functions.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "logs:CreateLogGroup",
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+              "Resource": ["*"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": "cognito-idp:AdminDeleteUser",
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["s3:*"],
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["DocumentS3Bucket", "Arn"]
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:GetItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["DDBTable", "Arn"]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": ["DDBTable", "Arn"]
+                      },
+                      "/index/*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "CognitoPreSignUpLambda": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Handler": "index.handler",
+        "Runtime": "nodejs12.x",
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-CognitoSignUp-Lambda"
+        },
+        "CodeUri": "src/CognitoPreSignUp",
+        "Role": {
+          "Fn::GetAtt": ["CognitoPreSignUpLambdaRole", "Arn"]
+        }
+      }
+    },
+    "CognitoPreSignUpLambdaLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "DependsOn": "CognitoPreSignUpLambda",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/aws/lambda/",
+              {
+                "Ref": "CognitoPreSignUpLambda"
+              }
+            ]
+          ]
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "CognitoPreSignUpLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Ref": "CognitoPreSignUpLambdaExecutionPolicy"
+          }
+        ]
+      }
+    },
+    "CognitoPreSignUpLambdaExecutionPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Base permissions needed by all lambda functions.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:CreateLogGroup"
+              ],
+              "Resource": ["*"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["cognito-idp:ListUsers"],
+              "Resource": ["*"]
+            }
+          ]
+        }
+      }
+    },
+    "CsvProcessorLambda": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Handler": "index.handler",
+        "Runtime": "nodejs12.x",
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-CsvProcessor-Lambda"
+        },
+        "CodeUri": "src/CsvProcessorLambda",
+        "Role": {
+          "Fn::GetAtt": ["CsvProcessorLambdaRole", "Arn"]
+        },
+        "Environment": {
+          "Variables": {
+            "ddbName": {
+              "Fn::Select": [
+                1,
+                {
+                  "Fn::Split": [
+                    "/",
+                    {
+                      "Fn::GetAtt": ["DDBTable", "Arn"]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "CsvProcessorLambdaLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "DependsOn": "CsvProcessorLambda",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/aws/lambda/",
+              {
+                "Ref": "CsvProcessorLambda"
+              }
+            ]
+          ]
+        },
+        "RetentionInDays": 14
+      }
+    },
+    "CsvProcessorLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Ref": "CsvProcessorLambdaExecutionPolicy"
+          }
+        ]
+      }
+    },
+    "CsvProcessorLambdaExecutionPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Base permissions needed by all lambda functions.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:CreateLogGroup"
+              ],
+              "Resource": ["*"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["s3:*"],
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["DocumentS3Bucket", "Arn"]
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:GetItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["DDBTable", "Arn"]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": ["DDBTable", "Arn"]
+                      },
+                      "/index/*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "CoreApiGatewayRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "apigateway.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "InvokeLambda",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": ["lambda:InvokeFunction"],
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": ["CoreApiLambda", "Arn"]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CoreApiGatewayDeployment": {
+      "Type": "AWS::ApiGateway::Deployment",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "Api"
+        },
+        "StageName": {
+          "Ref": "apiGatewayStageName"
+        }
+      }
+    },
+    "Api": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-Core-API"
+        },
+        "EndpointConfiguration": {
+          "Types": ["REGIONAL"]
+        },
+        "Description": "API",
+        "FailOnWarnings": true,
+        "Body": {
+          "swagger": 2,
+          "info": {
+            "description": " Core API\n",
+            "version": 1
+          },
+          "basePath": "/",
+          "schemes": ["https"],
+          "consumes": ["application/json"],
+          "produces": ["application/json"],
+          "securityDefinitions": {
+            "CognitoAuthorizer": {
+              "type": "apiKey",
+              "name": "Authorization",
+              "in": "header",
+              "x-amazon-apigateway-authtype": "cognito_user_pools",
+              "x-amazon-apigateway-authorizer": {
+                "providerARNs": [
+                  {
+                    "Fn::GetAtt": ["CognitoUserPool", "Arn"]
+                  }
+                ],
+                "type": "cognito_user_pools"
+              }
+            }
+          },
+          "paths": {
+            "awards/": {
+              "get": {
+                "description": "Get",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "options": {
+                "summary": "CORS support",
+                "description": "Enable CORS by returning correct headers\n",
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["CORS"],
+                "x-amazon-apigateway-integration": {
+                  "type": "mock",
+                  "requestTemplates": {
+                    "application/json": "{\n  \"statusCode\" : 200\n}\n"
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200",
+                      "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+                        "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,OPTIONS,PUT'",
+                        "method.response.header.Access-Control-Allow-Origin": "'*'"
+                      },
+                      "responseTemplates": {
+                        "application/json": "{}"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Default response for CORS method",
+                    "headers": {
+                      "Access-Control-Allow-Headers": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Methods": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "awards/{awardId}": {
+              "get": {
+                "description": "Get",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "put": {
+                "description": "Put",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "delete": {
+                "description": "Delete",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "options": {
+                "summary": "CORS support",
+                "description": "Enable CORS by returning correct headers\n",
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["CORS"],
+                "x-amazon-apigateway-integration": {
+                  "type": "mock",
+                  "requestTemplates": {
+                    "application/json": "{\n  \"statusCode\" : 200\n}\n"
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200",
+                      "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+                        "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,OPTIONS,PUT'",
+                        "method.response.header.Access-Control-Allow-Origin": "'*'"
+                      },
+                      "responseTemplates": {
+                        "application/json": "{}"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Default response for CORS method",
+                    "headers": {
+                      "Access-Control-Allow-Headers": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Methods": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "document/": {
+              "post": {
+                "description": "Post",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "produces": ["application/json"],
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "get": {
+                "description": "Get",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "produces": ["application/json"],
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "put": {
+                "description": "Put",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "options": {
+                "summary": "CORS support",
+                "description": "Enable CORS by returning correct headers\n",
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["CORS"],
+                "x-amazon-apigateway-integration": {
+                  "type": "mock",
+                  "requestTemplates": {
+                    "application/json": "{\n  \"statusCode\" : 200\n}\n"
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200",
+                      "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+                        "method.response.header.Access-Control-Allow-Methods": "'POST,DELETE,GET,OPTIONS,PUT'",
+                        "method.response.header.Access-Control-Allow-Origin": "'*'"
+                      },
+                      "responseTemplates": {
+                        "application/json": "{}\n"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Default response for CORS method",
+                    "headers": {
+                      "Access-Control-Allow-Headers": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Methods": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "document/{docId}": {
+              "get": {
+                "description": "Get",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              },
+              "options": {
+                "summary": "CORS support",
+                "description": "Enable CORS by returning correct headers\n",
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["CORS"],
+                "x-amazon-apigateway-integration": {
+                  "type": "mock",
+                  "requestTemplates": {
+                    "application/json": "{\n  \"statusCode\" : 200\n}\n"
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200",
+                      "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+                        "method.response.header.Access-Control-Allow-Methods": "'DELETE,GET,OPTIONS,PUT'",
+                        "method.response.header.Access-Control-Allow-Origin": "'*'"
+                      },
+                      "responseTemplates": {
+                        "application/json": "{}\n"
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Default response for CORS method",
+                    "headers": {
+                      "Access-Control-Allow-Headers": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Methods": {
+                        "type": "string"
+                      },
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "delete": {
+                "description": "Delete",
+                "security": [
+                  {
+                    "CognitoAuthorizer": []
+                  }
+                ],
+                "parameters": [],
+                "responses": {
+                  "200": {
+                    "description": "200 response",
+                    "schema": {
+                      "$ref": "#/definitions/Empty"
+                    },
+                    "headers": {
+                      "Access-Control-Allow-Origin": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "uri": {
+                    "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CoreApiLambda.Arn}/invocations"
+                  },
+                  "credentials": {
+                    "Fn::GetAtt": ["CoreApiGatewayRole", "Arn"]
+                  },
+                  "responses": {
+                    "default": {
+                      "statusCode": "200"
+                    }
+                  },
+                  "passthroughBehavior": "when_no_match",
+                  "httpMethod": "POST",
+                  "type": "aws_proxy"
+                }
+              }
+            }
+          },
+          "definitions": {
+            "Empty": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "UserPoolPreSignUpPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:invokeFunction",
+        "Principal": "cognito-idp.amazonaws.com",
+        "FunctionName": {
+          "Ref": "CognitoPreSignUpLambda"
+        },
+        "SourceArn": {
+          "Fn::GetAtt": ["CognitoUserPool", "Arn"]
+        }
+      }
+    },
+    "CognitoUserPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UserPoolName": {
+          "Fn::Sub": "${AWS::StackName}-userPool"
+        },
+        "MfaConfiguration": "OFF",
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_email",
+              "Priority": 1
+            }
+          ]
+        },
+        "AutoVerifiedAttributes": ["email"],
+        "Schema": [
+          {
+            "Name": "email",
+            "AttributeDataType": "String",
+            "Mutable": false,
+            "Required": true
+          },
+          {
+            "Name": "name",
+            "AttributeDataType": "String",
+            "Mutable": false,
+            "Required": true
+          }
+        ],
+        "UsernameConfiguration": {
+          "CaseSensitive": false
+        },
+        "LambdaConfig": {
+          "PreSignUp": {
+            "Fn::GetAtt": ["CognitoPreSignUpLambda", "Arn"]
+          }
+        },
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 6,
+            "RequireLowercase": false,
+            "RequireNumbers": true,
+            "RequireSymbols": false,
+            "RequireUppercase": true
+          }
+        }
+      }
+    },
+    "CognitoUserPoolClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "Properties": {
+        "ClientName": {
+          "Fn::Sub": "${AWS::StackName}-userPool-client"
+        },
+        "UserPoolId": {
+          "Ref": "CognitoUserPool"
+        }
+      }
+    },
+    "UserPoolGroup": {
+      "Type": "AWS::Cognito::UserPoolGroup",
+      "Properties": {
+        "Description": "Adminstrator",
+        "GroupName": "admin",
+        "UserPoolId": {
+          "Ref": "CognitoUserPool"
+        }
+      }
+    },
+    "UserPoolDomain": {
+      "Type": "AWS::Cognito::UserPoolDomain",
+      "Properties": {
+        "Domain": {
+          "Fn::Sub": "${AWS::StackName}"
+        },
+        "UserPoolId": {
+          "Ref": "CognitoUserPool"
+        }
+      }
+    },
+    "DDBTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": {
+          "Fn::Sub": "${AWS::StackName}-table"
+        },
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "PK",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "SK",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "GSI1-PK",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "GSI1-SK",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "GSI2-PK",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "GSI2-SK",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "PK",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "SK",
+            "KeyType": "RANGE"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [
+              {
+                "AttributeName": "GSI1-PK",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "GSI1-SK",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [
+              {
+                "AttributeName": "GSI2-PK",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "GSI2-SK",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ]
+      }
+    },
+    "DocumentS3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "${AWS::StackName}-document-store"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "CorsConfiguration": {
+          "CorsRules": [
+            {
+              "AllowedHeaders": ["*"],
+              "AllowedMethods": ["GET", "PUT", "HEAD", "POST"],
+              "AllowedOrigins": ["*"],
+              "ExposedHeaders": [],
+              "MaxAge": 3600
+            }
+          ]
+        }
+      }
+    },
+    "DocumentS3BucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "DocumentS3Bucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": ["s3:*"],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:s3:::",
+                    {
+                      "Ref": "DocumentS3Bucket"
+                    },
+                    "/*"
+                  ]
+                ]
+              },
+              "Principal": {
+                "AWS": [
+                  {
+                    "Fn::GetAtt": ["CoreApiLambdaRole", "Arn"]
+                  }
+                ]
+              }
+            },
+            {
+              "Action": ["s3:*"],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:s3:::",
+                    {
+                      "Ref": "DocumentS3Bucket"
+                    },
+                    "/*"
+                  ]
+                ]
+              },
+              "Principal": {
+                "AWS": [
+                  {
+                    "Fn::GetAtt": ["CsvProcessorLambdaRole", "Arn"]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "userPool": {
+      "Description": "User pool ID",
+      "Value": {
+        "Ref": "CognitoUserPool"
+      }
+    },
+    "ClientId": {
+      "Description": "Client id for the user pool appclient",
+      "Value": {
+        "Ref": "CognitoUserPoolClient"
+      }
+    },
+    "apiGatewayInvokeURL": {
+      "Value": {
+        "Fn::Sub": "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStageName}"
+      }
+    },
+    "ddbTable": {
+      "Description": "ddb table",
+      "Value": {
+        "Ref": "DDBTable"
+      }
+    }
+  }
+}

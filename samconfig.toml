@@ -1,0 +1,13 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "student-results-backend"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-91rvbrw2r28a"
+s3_prefix = "student-results-backend"
+region = "eu-west-2"
+profile = "abmaprod"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "apiGatewayStageName=\"prod\""
+image_repositories = []
